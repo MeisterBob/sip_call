@@ -22,6 +22,7 @@
 #include "esp_event.h"
 #include "esp_event_loop.h"
 #include "nvs_flash.h"
+#include "driver/gpio.h"
 
 #include "sip_client/lwip_udp_client.h"
 #include "sip_client/mbedtls_md5.h"
@@ -35,6 +36,12 @@
 static constexpr auto BELL_GPIO_PIN = static_cast<gpio_num_t>(CONFIG_BELL_INPUT_GPIO);
 // GPIO_NUM_23 is connected to the opto coupler
 static constexpr auto RING_DURATION_TIMEOUT_MSEC = CONFIG_RING_DURATION;
+
+static constexpr auto DOOR_GPIO_PIN = static_cast<gpio_num_t>(CONFIG_DOOR_OUTPUT_GPIO);
+static constexpr auto DOOR_DURATION_TIMEOUT_MSEC = CONFIG_DOOR_DURATION;
+char DOORCODE[5] = {CONFIG_DOORCODE};
+uint32_t CODE_POS = 0;
+static xQueueHandle door_opener_queue = NULL;
 
 #if CONFIG_POWER_SAVE_MODEM
 #define DEFAULT_PS_MODE WIFI_PS_MODEM
@@ -146,23 +153,45 @@ static void sip_task(void *pvParameters)
                 continue;
             }
             client.set_event_handler([](const SipClientEvent& event) {
-
-               switch (event.event)
-               {
-               case SipClientEvent::Event::CALL_START:
-                   ESP_LOGI(TAG, "Call start");
-                   break;
-               case SipClientEvent::Event::CALL_END:
-                   ESP_LOGI(TAG, "Call end");
-                   break;
-               case SipClientEvent::Event::BUTTON_PRESS:
-                   ESP_LOGI(TAG, "Got button press: %c for %d milliseconds", event.button_signal, event.button_duration);
-                   break;
-               }
+                uint32_t data = 0;
+                switch (event.event) {
+                    case SipClientEvent::Event::CALL_START:
+                        ESP_LOGI(TAG, "Call start");
+                        CODE_POS = 0;
+                    break;
+                    case SipClientEvent::Event::CALL_END:
+                        ESP_LOGI(TAG, "Call end");
+                        CODE_POS = 0;
+                    break;
+                    case SipClientEvent::Event::BUTTON_PRESS:
+                        ESP_LOGI(TAG, "Got button press: %c for %d milliseconds", event.button_signal, event.button_duration);
+                        if(event.button_signal == DOORCODE[CODE_POS]) CODE_POS++; else CODE_POS=0;
+                        if (CODE_POS==4) {
+                            CODE_POS = 0;
+                            xQueueSendToBack(door_opener_queue, &data, (TickType_t) 10);
+                        }
+                    break;
+                }
             });
         }
 
         client.run();
+    }
+}
+
+static void door_opener_task(void* arg) {
+    gpio_pad_select_gpio(DOOR_GPIO_PIN);
+    gpio_set_direction(DOOR_GPIO_PIN, GPIO_MODE_OUTPUT);
+    uint32_t data=0;
+    static constexpr uint32_t DOOR_DURATION_TICKS = DOOR_DURATION_TIMEOUT_MSEC / portTICK_PERIOD_MS;
+    for(;;) {
+        if(xQueueReceive(door_opener_queue, (void*) &data, portMAX_DELAY)) {
+            gpio_set_level((gpio_num_t) CONFIG_DOOR_OUTPUT_GPIO, 1);
+            ESP_LOGI("DOOR_OPENER_HANDLER", "door unlocked");
+            vTaskDelay(DOOR_DURATION_TICKS);
+            gpio_set_level((gpio_num_t) CONFIG_DOOR_OUTPUT_GPIO, 0);
+            ESP_LOGI("DOOR_OPENER_HANDLER", "door locked");
+        }
     }
 }
 
@@ -176,7 +205,9 @@ extern "C" void app_main(void)
     std::srand(esp_random());
     xTaskCreate(&sip_task, "sip_task", 4096, NULL, 5, NULL);
 
+    door_opener_queue = xQueueCreate(1, sizeof(uint32_t));
+    xTaskCreate(&door_opener_task, "door_opener_task", 4096, NULL, 5, NULL);
+
     //blocks forever
     button_input_handler.run();
 }
-

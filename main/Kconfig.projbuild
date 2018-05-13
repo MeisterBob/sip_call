@@ -33,6 +33,28 @@ config BELL_INPUT_GPIO
                 Some GPIOs are used for other purposes (flash connections, etc.) and cannot be used.
                 GPIO 0 is also the boot pin, so the BOOT button can be used for testing.
 
+config DOOR_OUTPUT_GPIO
+    int "Door output GPIO number"
+        range 0 39
+        default 0
+        help
+                GPIO number (IOxx) to operate the door opener.
+                Some GPIOs are used for other purposes (flash connections, etc.) and cannot be used.
+                GPIO 13 is the onboard LED, it can be used for testing.
+
+config DOORCODE
+    string "door open code"
+        default 1234
+        help
+            This is the code you have to type in the phone to open the door.
+
+config DOOR_DURATION
+    int "Door opener duration in milliseconds"
+        range 1000 10000
+        default 5000
+        help
+                This is the duration, the door opener is active.
+
 config RING_DURATION
     int "Ring duration in milliseconds"
         range 1000 30000
