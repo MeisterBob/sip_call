@@ -130,7 +130,6 @@ static void initialize_wifi(void)
     ESP_ERROR_CHECK( esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config) );
     ESP_ERROR_CHECK( esp_wifi_start() );
 
-    ESP_LOGI(TAG, "esp_wifi_set_ps().");
     esp_wifi_set_ps(DEFAULT_PS_MODE);
 }
 
@@ -140,7 +139,14 @@ static void sip_task(void *pvParameters)
     for(;;)
     {
         // Wait for wifi connection
-        xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT, false, true, portMAX_DELAY);
+        EventBits_t uxBits;
+        uxBits = xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT, false, true, 10000 / portTICK_RATE_MS);
+
+        if (!(uxBits & CONNECTED_BIT)) {
+            ESP_LOGI(TAG, "Wifi connection failed - retrying");
+            esp_wifi_connect();
+            continue;
+        }
 
         if (!client.is_initialized())
         {
