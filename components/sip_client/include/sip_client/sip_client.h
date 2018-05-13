@@ -292,7 +292,7 @@ private:
         }
 
         SipPacket::Status reply = packet.get_status();
-        ESP_LOGI(TAG, "Parsing the packet ok, reply code=%d", (int) packet.get_status());
+        ESP_LOGV(TAG, "Parsing the packet ok, reply code=%d", (int) packet.get_status());
 
         if (reply == SipPacket::Status::SERVER_ERROR_500)
         {
@@ -700,7 +700,21 @@ private:
 
     void log_state_transition(SipState old_state, SipState new_state)
     {
-        ESP_LOGI(TAG, "New state %d -> %d", (int) old_state, (int) new_state);
+        char* state[12] = {
+            (char*)"IDLE",
+            (char*)"REGISTER_UNAUTH",
+            (char*)"REGISTER_AUTH",
+            (char*)"REGISTERED",
+            (char*)"INVITE_UNAUTH",
+            (char*)"INVITE_UNAUTH_SENT",
+            (char*)"INVITE_AUTH",
+            (char*)"RINGING",
+            (char*)"CALL_START",
+            (char*)"CALL_IN_PROGRESS",
+            (char*)"CANCELLED",
+            (char*)"ERROR"
+        };
+        ESP_LOGI(TAG, "New state %s -> %s", state[(int) old_state], state[(int) new_state]);
     }
 
     SipState m_state = SipState::IDLE;
