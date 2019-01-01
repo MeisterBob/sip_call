@@ -120,7 +120,7 @@ static void initialize_wifi(void)
     ESP_ERROR_CHECK( esp_wifi_init(&cfg) );
     ESP_ERROR_CHECK( esp_wifi_set_storage(WIFI_STORAGE_RAM) );
 
-    wifi_config_t wifi_config;
+    wifi_config_t wifi_config = {};
     strncpy((char*)wifi_config.sta.ssid, CONFIG_WIFI_SSID, sizeof(wifi_config.sta.ssid));
     strncpy((char*)wifi_config.sta.password, CONFIG_WIFI_PASSWORD, sizeof(wifi_config.sta.password));
     wifi_config.sta.bssid_set = false;
@@ -133,6 +133,7 @@ static void initialize_wifi(void)
     esp_wifi_set_ps(DEFAULT_PS_MODE);
 }
 
+ButtonInputHandler<SipClientT, BELL_GPIO_PIN, RING_DURATION_TIMEOUT_MSEC> button_input_handler(client);
 
 static void sip_task(void *pvParameters)
 {
@@ -167,8 +168,13 @@ static void sip_task(void *pvParameters)
                     break;
                     case SipClientEvent::Event::CALL_END:
                         ESP_LOGI(TAG, "Call end");
+                   button_input_handler.call_end();
                         CODE_POS = 0;
                     break;
+               case SipClientEvent::Event::CALL_CANCELLED:
+                   ESP_LOGI(TAG, "Call cancelled, reason %d", (int) event.cancel_reason);
+                   button_input_handler.call_end();
+                   break;
                     case SipClientEvent::Event::BUTTON_PRESS:
                         ESP_LOGI(TAG, "Got button press: %c for %d milliseconds", event.button_signal, event.button_duration);
                         if(event.button_signal == DOORCODE[CODE_POS]) CODE_POS++; else CODE_POS=0;

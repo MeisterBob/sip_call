@@ -49,13 +49,21 @@ static void rtp_task(void *pvParameters)
 struct SipClientEvent {
         enum class Event {
             CALL_START,
+            CALL_CANCELLED,
             CALL_END,
             BUTTON_PRESS,
         };
 
+        enum class CancelReason {
+            UNKNOWN,
+            CALL_DECLINED,
+            TARGET_BUSY,
+        };
+
         Event event;
-        char button_signal;
-        uint16_t button_duration;
+        char button_signal = ' ';
+        uint16_t button_duration = 0;
+        CancelReason cancel_reason = CancelReason::UNKNOWN;
 };
 
 template <class SocketT, class Md5T>
@@ -305,7 +313,11 @@ private:
             m_realm = packet.get_realm();
             m_nonce = packet.get_nonce();
         }
-        else if ((reply == SipPacket::Status::UNKNOWN) && ((packet.get_method() == SipPacket::Method::NOTIFY) || (packet.get_method() == SipPacket::Method::BYE)|| (packet.get_method() == SipPacket::Method::INFO)))
+        else if ((reply == SipPacket::Status::UNKNOWN) &&
+                 ((packet.get_method() == SipPacket::Method::NOTIFY) ||
+                  (packet.get_method() == SipPacket::Method::BYE) ||
+                  (packet.get_method() == SipPacket::Method::INFO) ||
+                  (packet.get_method() == SipPacket::Method::INVITE)))
         {
             send_sip_ok(packet);
         }
@@ -347,6 +359,15 @@ private:
             }
             break;
         case SipState::REGISTERED:
+            if (packet.get_method() == SipPacket::Method::INVITE)
+            {
+                    //received an invite, answered it already with ok, so new call is established, because someone called us
+                    m_state = SipState::CALL_START;
+                    if (m_event_handler)
+                    {
+                            m_event_handler(SipClientEvent{SipClientEvent::Event::CALL_START});
+                    }
+            }
             break;
         case SipState::INVITE_UNAUTH_SENT:
         case SipState::INVITE_UNAUTH:
@@ -400,12 +421,16 @@ private:
                 m_state = SipState::CALL_START;
                 if (m_event_handler)
                 {
-                    m_event_handler(SipClientEvent{SipClientEvent::Event::CALL_START, ' ', 0});
+                    m_event_handler(SipClientEvent{SipClientEvent::Event::CALL_START});
                 }
             }
             else if (reply == SipPacket::Status::REQUEST_CANCELLED_487)
             {
                 m_state = SipState::CANCELLED;
+                if (m_event_handler)
+                {
+                    m_event_handler(SipClientEvent{SipClientEvent::Event::CALL_CANCELLED});
+                }
             }
             else if (reply == SipPacket::Status::PROXY_AUTH_REQ_407)
             {
@@ -414,13 +439,22 @@ private:
                 m_state = SipState::INVITE_AUTH;
                 ESP_LOGV(TAG, "Go back to send invite with auth...");
             }
-            else if (reply == SipPacket::Status::DECLINE_603)
+            else if ((reply == SipPacket::Status::DECLINE_603) || (reply == SipPacket::Status::BUSY_HERE_486))
             {
                 send_sip_ack();
                 m_sip_sequence_number++;
+                m_branch = std::rand() % 2147483647;
                 m_state = SipState::REGISTERED;
+                SipClientEvent::CancelReason cancel_reason = SipClientEvent::CancelReason::CALL_DECLINED;
+                if (reply == SipPacket::Status::BUSY_HERE_486)
+                {
+                    cancel_reason = SipClientEvent::CancelReason::TARGET_BUSY;
+                }
+                if (m_event_handler)
+                {
+                    m_event_handler(SipClientEvent{SipClientEvent::Event::CALL_CANCELLED, ' ', 0, cancel_reason});
+                }
             }
-
             break;
         case SipState::CALL_START:
             //should not reach this point
@@ -432,7 +466,7 @@ private:
                 m_state = SipState::REGISTERED;
                 if (m_event_handler)
                 {
-                    m_event_handler(SipClientEvent{SipClientEvent::Event::CALL_END, ' ', 0});
+                    m_event_handler(SipClientEvent{SipClientEvent::Event::CALL_END});
                 }
             }
             else if ((packet.get_method() == SipPacket::Method::INFO)
@@ -501,7 +535,7 @@ private:
         tx_buffer << "Allow: INVITE, ACK, CANCEL, OPTIONS, BYE, REFER, NOTIFY, MESSAGE, SUBSCRIBE, INFO\r\n";
         m_tx_sdp_buffer.clear();
         m_tx_sdp_buffer << "v=0\r\n"
-                << "o=620 " << m_sdp_session_id << " " << m_sdp_session_id << " IN IP4 " << m_my_ip << "\r\n"
+                << "o=" << m_user << " " << m_sdp_session_id << " " << m_sdp_session_id << " IN IP4 " << m_my_ip << "\r\n"
                 << "s=sip-client/0.0.1\r\n"
                 << "c=IN IP4 " << m_my_ip << "\r\n"
                 << "t=0 0\r\n"

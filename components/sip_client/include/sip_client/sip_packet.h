@@ -29,6 +29,7 @@ public:
         OK_200,
         UNAUTHORIZED_401,
         PROXY_AUTH_REQ_407,
+        BUSY_HERE_486,
         REQUEST_CANCELLED_487,
         SERVER_ERROR_500,
         DECLINE_603,
@@ -39,6 +40,7 @@ public:
         NOTIFY,
         BYE,
         INFO,
+        INVITE,
         UNKNOWN
     };
 
@@ -382,6 +384,7 @@ private:
         case 100: return Status::TRYING_100;
         case 183: return Status::SESSION_PROGRESS_183;
         case 500: return Status::SERVER_ERROR_500;
+        case 486: return Status::BUSY_HERE_486;
         case 487: return Status::REQUEST_CANCELLED_487;
         case 407: return Status::PROXY_AUTH_REQ_407;
         case 603: return Status::DECLINE_603;
@@ -402,6 +405,10 @@ private:
         if (strstr(input, INFO) == input)
         {
             return Method::INFO;
+        }
+        if (strstr(input, INVITE) == input)
+        {
+            return Method::INVITE;
         }
         return Method::UNKNOWN;
     }
@@ -457,6 +464,7 @@ private:
     static constexpr const char* NOTIFY = "NOTIFY ";
     static constexpr const char* BYE = "BYE ";
     static constexpr const char* INFO = "INFO ";
+    static constexpr const char* INVITE = "INVITE ";
     static constexpr const char* APPLICATION_DTMF_RELAY = "application/dtmf-relay";
     static constexpr const char* SIGNAL = "Signal=";
     static constexpr const char* DURATION = "Duration=";
