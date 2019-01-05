@@ -207,8 +207,6 @@ static void door_opener_task(void* arg) {
     }
 }
 
-ButtonInputHandler<SipClientT, BELL_GPIO_PIN, RING_DURATION_TIMEOUT_MSEC> button_input_handler(client);
-
 extern "C" void app_main(void)
 {
     nvs_flash_init();
