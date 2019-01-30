@@ -42,6 +42,13 @@ config DOOR_OUTPUT_GPIO
                 Some GPIOs are used for other purposes (flash connections, etc.) and cannot be used.
                 GPIO 13 is the onboard LED, it can be used for testing.
 
+config FLASHLED
+    int "LED flash output GPIO number"
+        range -1 39
+        default 4
+        help
+                GPIO number (IOxx) to operate the LED flash.
+
 config DOORCODE
     string "door open code"
         default 1234
@@ -119,5 +126,15 @@ config CALLER_DISPLAY_MESSAGE
                 This message is shown on the called device.
 
                 See README.md for details.
+
+endmenu
+
+menu "MQTT Settings"
+
+config BROKER_URL
+    string "Broker URL"
+    default "mqtt://iot.eclipse.org"
+    help
+        URL of the broker to connect to
 
 endmenu

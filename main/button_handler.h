@@ -23,6 +23,8 @@
 
 #include "driver/gpio.h"
 
+#include "main.h"
+
 namespace sml = boost::sml;
 
 struct e_btn {};
@@ -86,8 +88,10 @@ public:
 
             if(xQueueReceive(m_queue, &event, timeout)) {
                 if (event == Event::BUTTON_PRESS) {
+                    esp_mqtt_client_publish(mqtt_client, mqttOutTopic, "1", 0, 0, 0);
                     m_sm.process_event(e_btn{});
                 } else if (event == Event::CALL_END) {
+                    esp_mqtt_client_publish(mqtt_client, mqttOutTopic, "0", 0, 0, 0);
                     m_sm.process_event(e_call_end{});
                 }
             } else {
