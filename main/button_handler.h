@@ -81,17 +81,23 @@ public:
 
     void run() {
         using namespace sml;
+        btnState = false;
         for (;;)
         {
             Event event;
             TickType_t timeout = m_sm.is("idle"_s) ? portMAX_DELAY : RING_DURATION_TICKS;
 
             if(xQueueReceive(m_queue, &event, timeout)) {
-                if (event == Event::BUTTON_PRESS) {
-                    esp_mqtt_client_publish(mqtt_client, mqttOutTopic, "1", 0, 0, 0);
+                mqtt_out_msg_t msg;
+                if (!btnState && event == Event::BUTTON_PRESS) {
+                    msg = DING;
+                    btnState = true;
+                    xQueueSend(mqtt_queue, &msg, ( TickType_t ) 0);
                     m_sm.process_event(e_btn{});
-                } else if (event == Event::CALL_END) {
-                    esp_mqtt_client_publish(mqtt_client, mqttOutTopic, "0", 0, 0, 0);
+                } else if (btnState && event == Event::CALL_END) {
+                    msg = DONG;
+                    btnState = false;
+                    xQueueSend(mqtt_queue, &msg, ( TickType_t ) 0);
                     m_sm.process_event(e_call_end{});
                 }
             } else {
@@ -109,6 +115,7 @@ public:
 private:
     SipClientT& m_client;
     QueueHandle_t m_queue;
+    bool btnState;
 
     using ButtonInputHandlerT = ButtonInputHandler<SipClientT, GPIO_PIN, RING_DURATION_TIMEOUT_MSEC>;
 

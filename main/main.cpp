@@ -24,7 +24,6 @@
 #include "esp_event_loop.h"
 #include "nvs_flash.h"
 #include "driver/gpio.h"
-#include "mqtt_client.h"
 
 // default librarys
 #include <stdio.h>
@@ -32,15 +31,33 @@
 #include <stdlib.h>
 
 // components
+#include "mqtt_task.h"
 #include "app_camera.h"
 #include "http_server.h"
 #include "sip_client/lwip_udp_client.h"
 #include "sip_client/mbedtls_md5.h"
 #include "sip_client/sip_client.h"
-
 #include "button_handler.h"
 
 #include "main.h"
+
+static const char *TAG = "main";
+
+static void handle_jpg(http_context_t http_ctx, void* ctx);
+
+using SipClientT = SipClient<LwipUdpClient, MbedtlsMd5>;
+SipClientT s_client{CONFIG_SIP_USER, CONFIG_SIP_PASSWORD, CONFIG_SIP_SERVER_IP, CONFIG_SIP_SERVER_PORT, CONFIG_LOCAL_IP};
+
+const int CONNECTED_BIT = BIT0;
+static ip4_addr_t s_ip_addr;
+
+uint32_t CODE_POS = 0;
+
+static EventGroupHandle_t wifi_event_group;
+
+ButtonInputHandler<SipClientT, BELL_GPIO_PIN, RING_DURATION_TIMEOUT_MSEC> button_input_handler(s_client);
+
+/*************************************************************************************************************************/
 
 static std::string ip_to_string(const ip4_addr_t *ip) {
     static constexpr size_t BUFFER_SIZE = 16;
@@ -107,8 +124,8 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event) {
             break;
         case MQTT_EVENT_DATA:
                 ESP_LOGI(TAG, "MQTT_EVENT_DATA");
-//                printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
-//                printf("DATA=%.*s\r\n", event->data_len, event->data);
+                //printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
+                //printf("DATA=%.*s\r\n", event->data_len, event->data);
             break;
         case MQTT_EVENT_ERROR:
                 ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
@@ -116,7 +133,6 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event) {
     }
     return ESP_OK;
 }
-
 
 static void initialize_wifi(void) {
     tcpip_adapter_init();
@@ -143,8 +159,6 @@ void led_init() {
     gpio_pad_select_gpio(GPIO_LEDFLASH);
     gpio_set_direction(GPIO_LEDFLASH, GPIO_MODE_OUTPUT);
 }
-
-ButtonInputHandler<SipClientT, BELL_GPIO_PIN, RING_DURATION_TIMEOUT_MSEC> button_input_handler(s_client);
 
 static void sip_task(void *pvParameters) {
     for(;;)     {
@@ -214,7 +228,7 @@ static void door_opener_task(void* arg) {
     }
 }
 
-static void app_mqtt(void) {
+static void app_mqtt(void* arg) {
     esp_mqtt_client_config_t mqtt_cfg = {};
     mqtt_cfg.event_handle = mqtt_event_handler;
     mqtt_cfg.uri = CONFIG_BROKER_URL;
@@ -224,17 +238,56 @@ static void app_mqtt(void) {
 
     mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
     esp_mqtt_client_start(mqtt_client);
+    mqtt_out_msg_t data;
+    for(;;) {
+        if(xQueueReceive(mqtt_queue, &data, portMAX_DELAY)) {
+            switch (data) {
+                case DING: esp_mqtt_client_publish(mqtt_client, mqttOutTopic, "1", 0, 0, 0); break;
+                case DONG: esp_mqtt_client_publish(mqtt_client, mqttOutTopic, "0", 0, 0, 0); break;
+                case TEST: esp_mqtt_client_publish(mqtt_client, mqttOutTopic, "test", 0, 0, 0); break;
+            }
+        }
+    }
+}
+
+static esp_err_t write_frame(http_context_t http_ctx, camera_fb_t * fb) {
+    http_buffer_t fb_data = {
+            .data = fb->buf,
+            .size = fb->len,
+            .data_is_persistent = true
+    };
+    return http_response_write(http_ctx, &fb_data);
+}
+
+static void handle_jpg(http_context_t http_ctx, void* ctx) {
+    ESP_LOGI(TAG, "handle jpg");
+
+    gpio_set_level(GPIO_LEDFLASH, 1);
+	vTaskDelay(50 / portTICK_PERIOD_MS);
+
+    camera_fb_t * fb = esp_camera_fb_get();
+    if (fb == NULL) {
+        ESP_LOGE(TAG, "Camera capture failed");
+        return;
+    } else {
+        http_response_begin(http_ctx, 200, "image/jpeg", fb->len);
+        http_response_set_header(http_ctx, "Content-disposition", "inline; filename=capture.jpg");
+        write_frame(http_ctx, fb);
+        http_response_end(http_ctx);
+    }
+
+    gpio_set_level(GPIO_LEDFLASH, 0);
 }
 
 extern "C" void app_main(void) {
-    esp_log_level_set("*", ESP_LOG_WARN);
+    esp_log_level_set("*", ESP_LOG_INFO);
     esp_log_level_set("main", ESP_LOG_INFO);
-    esp_log_level_set("wifi", ESP_LOG_INFO);
+    esp_log_level_set("wifi", ESP_LOG_WARN);
     esp_log_level_set("http_server", ESP_LOG_WARN);
     esp_log_level_set("gpio", ESP_LOG_WARN);
-    esp_log_level_set("camera", ESP_LOG_INFO);
-    esp_log_level_set("camera_xclk", ESP_LOG_INFO);
-    esp_log_level_set("SipClient", ESP_LOG_INFO);
+    esp_log_level_set("camera", ESP_LOG_WARN);
+    esp_log_level_set("camera_xclk", ESP_LOG_WARN);
+    esp_log_level_set("SipClient", ESP_LOG_WARN);
 
     esp_err_t err = nvs_flash_init();
     if (err != ESP_OK) {
@@ -268,38 +321,10 @@ extern "C" void app_main(void) {
     led_init();
 
     ESP_LOGD(TAG, "initialize MQTT client");
-    app_mqtt();
+    mqtt_queue = xQueueCreate(1, sizeof(mqtt_out_msg_t));
+    xTaskCreate(&app_mqtt, "mqtt_task", 4096, NULL, 5, NULL);
 
     //blocks forever
     ESP_LOGD(TAG, "initialize button handler");
     button_input_handler.run();
-}
-
-static esp_err_t write_frame(http_context_t http_ctx, camera_fb_t * fb) {
-    http_buffer_t fb_data = {
-            .data = fb->buf,
-            .size = fb->len,
-            .data_is_persistent = true
-    };
-    return http_response_write(http_ctx, &fb_data);
-}
-
-static void handle_jpg(http_context_t http_ctx, void* ctx) {
-    ESP_LOGI(TAG, "handle jpg");
-
-    gpio_set_level(GPIO_LEDFLASH, 1);
-	vTaskDelay(50 / portTICK_PERIOD_MS);
-
-    camera_fb_t * fb = esp_camera_fb_get();
-    if (fb == NULL) {
-        ESP_LOGE(TAG, "Camera capture failed");
-        return;
-    } else {
-        http_response_begin(http_ctx, 200, "image/jpeg", fb->len);
-        http_response_set_header(http_ctx, "Content-disposition", "inline; filename=capture.jpg");
-        write_frame(http_ctx, fb);
-        http_response_end(http_ctx);
-    }
-
-    gpio_set_level(GPIO_LEDFLASH, 0);
 }

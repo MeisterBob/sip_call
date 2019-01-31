@@ -137,4 +137,28 @@ config BROKER_URL
     help
         URL of the broker to connect to
 
+config TOPIC_OUT
+    string "out topic"
+    default "/door/set"
+    help
+        URL of the broker to connect to
+
+config TOPIC_IN
+    string "in topic"
+    default "/door"
+    help
+        URL of the broker to connect to
+
+config TOPIC_STATUS
+    string "status & lwt topic"
+    default "/door/status"
+    help
+        URL of the broker to connect to
+
+config TOPIC_VERSION
+    string "version topic"
+    default "/door/version"
+    help
+        URL of the broker to connect to
+
 endmenu
